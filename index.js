@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
  * @license
- * Copyright (c) 2014 The Polymer Project Authors. All rights reserved.
+ * Copyright (c) LIMIT14 The Polymer Project Authors. All rights reserved.
  * This code may only be used under the BSD style license found at http://polymer.github.io/LICENSE.txt
  * The complete set of authors may be found at http://polymer.github.io/AUTHORS.txt
  * The complete set of contributors may be found at http://polymer.github.io/CONTRIBUTORS.txt
@@ -18,6 +18,8 @@ var _ = require('lodash');
 var semver = require('semver');
 var GH = require('github');
 var TOKEN = require('fs').readFileSync('token', 'utf8').trim();
+
+var LIMIT = 20;
 
 var github = new GH({
   version: '3.0.0'
@@ -63,99 +65,96 @@ function getApiLimit(cb) {
   });
 }
 
-var limit_start;
+function main(err, results) {
+  var limit_start;
 
-async.waterfall([
-  function (callback) {
+  async.waterfall([
+    function (callback) {
+      getApiLimit(function(err, limits) {
+        if (err) {
+          return callback(err);
+        }
+        if (limits.remaining === 0) {
+          console.log(limits);
+          callback(new Error('API Limit Reached! Reset on ' + new Date(limits.reset * 1000)));
+        } else {
+          console.log(limits);
+          limit_start = limits.remaining;
+          callback();
+        }
+      });
+    },
+    async.apply(search, ['Polymer', 'PolymerLabs'])
+  ], function(err, results) {
+    if (err) {
+      console.error(err);
+      process.exit(1);
+      return;
+    }
+    var actual = _.filter(results, function(r) { return r.commits; });
+
+    console.log();
+    _.each(actual, function(as) {
+      console.log("%s/%s\t%d", as.user, as.repo, as.commits);
+    });
+    console.log();
+
     getApiLimit(function(err, limits) {
-      if (err) {
-        return callback(err);
-      }
-      if (limits.remaining === 0) {
-        console.log(limits);
-        callback(new Error('API Limit Reached! Reset on ' + new Date(limits.reset * 1000)));
-      } else {
-        console.log(limits);
-        limit_start = limits.remaining;
-        callback();
-      }
+      var r = limits.remaining;
+      console.log('remaining API calls:', r);
+      console.log('used:', limit_start - r);
     });
-  },
-  function (callback) {
-    github.repos.getFromOrg({org: 'Polymer', type: 'public'}, function(err, res) {
+  });
+}
+
+function search(orgs, fin) {
+  async.waterfall([
+    function (callback) {
       console.log('getting repos');
-      accumulate(function(array) {
-        return _.map(array, function(r) {
-          return {repo: r.name, user: r.owner.login};
+      async.map(orgs, function(org, next) {
+        github.repos.getFromOrg({org: org, type: 'public'}, function(err, res) {
+          accumulate(function(array) {
+            return _.map(array, function(r) {
+              return {repo: r.name, user: r.owner.login};
+            });
+          }, next)(err, res);
         });
-      }, callback)(err, res);
-    });
-  },
-  function (repos, callback) {
-    console.log('getting tags');
-    async.mapLimit(repos, 20, function(r, next) {
-      github.repos.getTags(r, function(err, res) {
-        accumulate(function(array) {
-          return _.map(array, function(a) {
-            return {repo: r.repo, user: r.user, sha: a.commit.sha, name: a.name};
-          });
-        }, next)(err, res);
-      });
-    }, function(err, tags) {
-      if (err) {
-        return callback(err);
-      }
-      var sorted = _.map(_.filter(tags, function(t){ return t.length; }), function(ts) {
-        return ts.sort(function(a, b) {
-          return semver.rcompare(a.name, b.name);
-        })[0];
-      });
-      callback(null, _.flatten(sorted, true));
-    });
-  },
-  function (latest, callback) {
-    console.log('mapping tags to commits');
-    async.mapLimit(latest, 20, function(l, next) {
-      github.repos.getCommit(l, function(err, res) {
-        if (err) {
-          return next(err);
-        }
-        next(null, {repo: l.repo, user: l.user, last_sha: l.sha, since: res.commit.committer.date});
-      });
-    }, callback);
-  },
-  function(tags, callback) {
-    console.log('repos with commits past last tag');
-    async.mapLimit(tags, 20, function(t, next) {
-      github.repos.getCommits(t, function(err, res) {
-        if (err) {
-          return next(err);
-        }
-        var since = _.filter(res, function(rc) {
-          return rc.sha !== t.last_sha;
+      }, flatten(callback));
+    },
+    function (repos, callback) {
+      console.log('getting tags');
+      async.mapLimit(repos, LIMIT, function(r, next) {
+        github.repos.getTags(r, function(err, res) {
+          accumulate(function(array) {
+            return _.map(array, function(a) {
+              return {repo: r.repo, user: r.user, head: 'master', base: a.name};
+            });
+          }, next)(err, res);
         });
-        next(null, {repo: t.repo, commits: since.length, last_tag: t.since});
+      }, function(err, tags) {
+        if (err) {
+          return callback(err);
+        }
+        var sorted = _.map(_.filter(tags, function(t){ return t.length; }), function(ts) {
+          return ts.sort(function(a, b) {
+            return semver.rcompare(a.base, b.base);
+          })[0];
+        });
+        callback(null, _.flatten(sorted, true));
       });
-    }, flatten(callback));
-  }
-], function(err, results) {
-  if (err) {
-    console.error(err);
-    process.exit(1);
-    return;
-  }
-  var actual = _.filter(results, function(r) { return r.commits; });
+    },
+    function (latest, callback) {
+      console.log('checking commits after latest tag');
+      async.mapLimit(latest, LIMIT, function(l, next) {
+        github.repos.compareCommits(l, function(err, res) {
+          if (err) {
+            return next(err);
+          }
+          next(null, {repo: l.repo, user: l.user, commits: res.ahead_by});
+        });
+      }, callback);
+    }
+  ], fin);
+}
 
-  console.log();
-  _.each(actual, function(as) {
-    console.log("%s\t%d\t%s", as.repo, as.commits, as.last_tag);
-  });
-  console.log();
-
-  getApiLimit(function(err, limits) {
-    var r = limits.remaining;
-    console.log('remaining API calls:', r);
-    console.log('used:', limit_start - r);
-  });
-
-});
+main();
