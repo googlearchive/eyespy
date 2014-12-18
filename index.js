@@ -11,6 +11,8 @@
 
 // jshint node: true
 
+'use strict';
+
 var async = require('async');
 var _ = require('lodash');
 var semver = require('semver');
@@ -52,24 +54,35 @@ function flatten(cb) {
   };
 }
 
+function getApiLimit(cb) {
+  github.misc.rateLimit({}, function(err, res) {
+    if (err) {
+      return cb(err);
+    }
+    cb(null, res.resources.core);
+  });
+}
+
+var limit_start;
+
 async.waterfall([
   function (callback) {
-    github.misc.rateLimit({}, function(err, res) {
+    getApiLimit(function(err, limits) {
       if (err) {
         return callback(err);
       }
-      var limits = res.resources.core;
       if (limits.remaining === 0) {
         console.log(limits);
         callback(new Error('API Limit Reached! Reset on ' + new Date(limits.reset * 1000)));
       } else {
         console.log(limits);
+        limit_start = limits.remaining;
         callback();
       }
     });
   },
   function (callback) {
-    github.repos.getFromOrg({org: 'Polymer'}, function(err, res) {
+    github.repos.getFromOrg({org: 'Polymer', type: 'public'}, function(err, res) {
       console.log('getting repos');
       accumulate(function(array) {
         return _.map(array, function(r) {
@@ -103,12 +116,11 @@ async.waterfall([
   function (latest, callback) {
     console.log('mapping tags to commits');
     async.mapLimit(latest, 20, function(l, next) {
-      console.log(l);
       github.repos.getCommit(l, function(err, res) {
         if (err) {
           return next(err);
         }
-        next(null, {repo: l.repo, user: l.user, since: res.commit.committer.date});
+        next(null, {repo: l.repo, user: l.user, last_sha: l.sha, since: res.commit.committer.date});
       });
     }, callback);
   },
@@ -120,9 +132,9 @@ async.waterfall([
           return next(err);
         }
         var since = _.filter(res, function(rc) {
-          return rc.sha !== t.sha;
+          return rc.sha !== t.last_sha;
         });
-        next(null, {repo: t.repo, commits: since.length});
+        next(null, {repo: t.repo, commits: since.length, last_tag: t.since});
       });
     }, flatten(callback));
   }
@@ -133,5 +145,17 @@ async.waterfall([
     return;
   }
   var actual = _.filter(results, function(r) { return r.commits; });
-  console.log(actual);
+
+  console.log();
+  _.each(actual, function(as) {
+    console.log("%s\t%d\t%s", as.repo, as.commits, as.last_tag);
+  });
+  console.log();
+
+  getApiLimit(function(err, limits) {
+    var r = limits.remaining;
+    console.log('remaining API calls:', r);
+    console.log('used:', limit_start - r);
+  });
+
 });
