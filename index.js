@@ -14,6 +14,7 @@
 'use strict';
 
 var async = require('async');
+var chalk = require('chalk');
 var _ = require('lodash');
 var semver = require('semver');
 var GH = require('github');
@@ -30,6 +31,25 @@ github.authenticate({
   token: TOKEN
 });
 
+function processConfig() {
+  var config = require('./config.json');
+  var bl = config.blacklist;
+  if (bl) {
+    Object.keys(bl).forEach(function(o) {
+      var blo = bl[o];
+      if (blo.regex) {
+        blo.regex = blo.regex.map(function(blr) {
+          return new RegExp(blr);
+        });
+      }
+    });
+  }
+  return config;
+}
+
+var config = processConfig();
+
+// reduce all the paginated results from github into one array
 function accumulate(fn, cb) {
   var full = [];
   return function afn(err, response) {
@@ -46,6 +66,7 @@ function accumulate(fn, cb) {
   };
 }
 
+// flatten nested arrays one level
 function flatten(cb) {
   return function(err, xs) {
     if (err) {
@@ -63,6 +84,37 @@ function getApiLimit(cb) {
     }
     cb(null, res.resources.core);
   });
+}
+
+function printOutput(results, limit_start) {
+  var actual = _.filter(results, function(r) { return r.commits; });
+
+  console.log();
+  _.each(actual, function(as) {
+    console.log("%s/%s\t%d", as.user, as.repo, as.commits);
+  });
+  console.log();
+
+  getApiLimit(function(err, limits) {
+    var r = limits.remaining;
+    console.log('remaining API calls:', r);
+    console.log('used:', limit_start - r);
+  });
+}
+
+function blackListed(repo) {
+  var blacklist = config.blacklist;
+  if (!blacklist) return;
+  var org = blacklist[repo.user];
+  if (!org) return;
+  var explicit = org.repos && org.repos.indexOf(repo.repo) > -1;
+  if (explicit) {
+    return true;
+  } else {
+    return org.regex.some(function(rgx) {
+      return rgx.test(repo.repo);
+    });
+  }
 }
 
 function main(err, results) {
@@ -84,26 +136,14 @@ function main(err, results) {
         }
       });
     },
-    async.apply(search, ['Polymer', 'PolymerLabs'])
+    async.apply(search, config.orgs)
   ], function(err, results) {
     if (err) {
-      console.error(err);
+      console.error(chalk.red(err));
       process.exit(1);
       return;
     }
-    var actual = _.filter(results, function(r) { return r.commits; });
-
-    console.log();
-    _.each(actual, function(as) {
-      console.log("%s/%s\t%d", as.user, as.repo, as.commits);
-    });
-    console.log();
-
-    getApiLimit(function(err, limits) {
-      var r = limits.remaining;
-      console.log('remaining API calls:', r);
-      console.log('used:', limit_start - r);
-    });
+    printOutput(results, limit_start);
   });
 }
 
@@ -114,9 +154,14 @@ function search(orgs, fin) {
       async.map(orgs, function(org, next) {
         github.repos.getFromOrg({org: org, type: 'public'}, function(err, res) {
           accumulate(function(array) {
-            return _.map(array, function(r) {
+            return _.chain(array)
+            .map(function(r) {
               return {repo: r.name, user: r.owner.login};
-            });
+            })
+            .filter(function(r) {
+              return !blackListed(r);
+            })
+            .value();
           }, next)(err, res);
         });
       }, flatten(callback));
@@ -135,12 +180,16 @@ function search(orgs, fin) {
         if (err) {
           return callback(err);
         }
-        var sorted = _.map(_.filter(tags, function(t){ return t.length; }), function(ts) {
+        var sorted = _.chain(tags)
+        .filter(function(t){ return t.length; })
+        .map(function(ts) {
           return ts.sort(function(a, b) {
             return semver.rcompare(a.base, b.base);
           })[0];
-        });
-        callback(null, _.flatten(sorted, true));
+        })
+        .flatten(true)
+        .value();
+        callback(null, sorted);
       });
     },
     function (latest, callback) {
