@@ -16,6 +16,7 @@
     "chalk": "^0.5.1",
     "github": "^0.2.3",
     "lodash": "^2.4.1",
+    "nopt": "^3.0.1",
     "semver": "^4.1.0"
   },
   "devDependencies": {},
