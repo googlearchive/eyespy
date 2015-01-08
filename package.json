@@ -2,7 +2,10 @@
   "name": "eyespy",
   "version": "1.0.0",
   "description": "Watch Github org for changes",
-  "main": "index.js",
+  "main": "lib/eyespy.js",
+  "bin": {
+    "eyespy": "index.js"
+  },
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
