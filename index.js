@@ -27,11 +27,11 @@ var options = nopt(
     'verbose': Boolean
   },
   {
-    '?': ['--help'],
-    'h': ['--help'],
-    'c': ['--config'],
-    't': ['--token'],
-    'v': ['--verbose']
+    '?': '--help',
+    'h': '--help',
+    'c': '--config',
+    't': '--token',
+    'v': '--verbose'
   }
 );
 
