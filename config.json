@@ -1,0 +1,16 @@
+{
+  "orgs": [
+    "PolymerLabs"
+  ],
+  "blacklist": {
+    "PolymerLabs": {
+      "repos": [
+        "labs",
+        "projects"
+      ],
+      "regex": [
+        "^polymer-"
+      ]
+    }
+  }
+}
