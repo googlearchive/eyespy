@@ -1,0 +1,20 @@
+{
+  "orgs": [
+    "PolymerElements"
+  ],
+  "blacklist": {
+    "PolymerElements": {
+      "repos": [
+        "molecules",
+        "polymer-starter-kit",
+        "iron-test-helpers",
+        "app-layout-templates"
+      ],
+      "regex": [
+        "^gold-",
+        "^platinum-",
+        "-elements$"
+      ]
+    }
+  }
+}

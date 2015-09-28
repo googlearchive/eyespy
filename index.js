@@ -112,16 +112,23 @@ eyespy.getApiLimit(function(err, limits) {
 });
 
 function printOutput(results, limit_start) {
-  var actual = _.filter(results, function(r) { return r.commits; });
-  var s;
-
-  _.each(actual, function(as) {
-    if (options.verbose) {
-      console.log(chalk.green('%s/%s') + '\t' + chalk.dim('%d commits since last release'), as.user, as.repo, as.commits);
-    } else {
-      console.log(chalk.green('%s/%s'), as.user, as.repo);
+  var mytotal = 0;
+  var total = 0;
+  var repos = 0;
+  _.each(results, function(res) {
+    var nc = 0;
+    if (res.stats) {
+      nc = res.stats.total;
+      mytotal += nc;
+      total += res.commits;
+      repos += 1;
     }
+    console.log(chalk.green('%s/%s') + '\t' + chalk.dim('%d/%d commits'), res.user, res.repo, nc, res.commits);
   });
+  
+  console.log();
+  console.log('Total repositories contributed to: ' + chalk.red('%d') + '/%d', repos, results.length);
+  console.log('Total commits: ' + chalk.red('%d') + '/%d', mytotal, total);
 
   if (options.verbose) {
     console.log();
